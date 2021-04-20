@@ -16,6 +16,8 @@
 // Returns the number of dedicated inode blocks given the disk size in blocks
 #define NUM_INODE_BLOCKS(disk_size_in_blocks) (1 + (disk_size_in_blocks / 10))
 
+char* bitmap;
+
 struct fs_superblock {
 	int magic;          // Magic bytes
 	int nblocks;        // Size of the disk in number of blocks
@@ -51,21 +53,102 @@ void fs_debug()
 
 int fs_format()
 {
-	return 0;
+	// put in magic number, choose ninodeblocks
+
+	int size = disk_size();
+
+	union fs_block block;
+	block.super.magic = FS_MAGIC;
+	block.super.nblocks = size;
+
+	int numinodeblock = NUM_INODE_BLOCKS(size);
+
+	block.super.ninodeblocks = numinodeblock;
+	block.super.ninodes = numinodeblock * INODES_PER_BLOCK;
+
+	disk_write(0, block.data);
+	return 1;
 }
 
 int fs_mount()
+// build free block bitmap by scanning through all inodes and seeing which are in use
+
 {
+	union fs_block block;
+
+	disk_read(0, block.data);
+	bitmap = malloc(block.super.nblocks);
+	bitmap[0] = 1;
+
+	if(block.super.magic == FS_MAGIC) {
+		// iterate through inode blocks
+		for(int i = 1; i < block.super.ninodeblocks+1; i++) {
+				union fs_block newblock;
+				disk_read(i, newblock.data);
+
+				// for each inode block iterate through its inodes (there should be 128)
+				for(int j = 0; j < INODES_PER_BLOCK; j++) {
+					if(newblock.inode[j].isvalid == 1) {
+
+						for(int k = 0; k < POINTERS_PER_INODE; k++) {
+							if (newblock.inode[j].direct[k] != 0) {
+								bitmap[newblock.inode[j].direct[k]] = 1;
+							}
+						}
+						if (newblock.inode[j].indirect != 0) {
+							union fs_block pointers;
+							disk_read(newblock.inode[j].indirect, pointers.data);
+							for(int k = 0; k < POINTERS_PER_BLOCK; k++) {
+								if (pointers.pointers[k] != 0) {
+									bitmap[pointers.pointers[k]] = 1;
+								}
+							}
+						}
+					}
+				}
+
+		}
+		return 1;
+	}
+
 	return 0;
 }
 
 int fs_unmount()
 {
+	free(bitmap);
+	return 1;
 	return 0;
 }
 
 int fs_create()
 {
+	// when created, choose first available inumber and return it to user.
+
+	union fs_block block;
+	disk_read(0, block.data);
+
+	int inumber = 0;
+
+	for(int i = 1; i < block.super.ninodeblocks+1; i++) {
+			union fs_block newblock;
+			disk_read(i, newblock.data);
+
+			for(int j = 0; j < INODES_PER_BLOCK; j++) {
+
+				if(newblock.inode[j].isvalid != 1) {
+					struct fs_inode inode;
+					inode.isvalid = 1;
+					inode.size = 0;
+					newblock.inode[j] = inode;
+					disk_write(i, newblock.data);
+					return inumber;
+				}
+				inumber += 1;
+			}
+
+	}
+
 	return -1;
 }
 
