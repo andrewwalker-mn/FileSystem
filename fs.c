@@ -17,6 +17,7 @@
 #define NUM_INODE_BLOCKS(disk_size_in_blocks) (1 + (disk_size_in_blocks / 10))
 
 char* bitmap;
+char mounted = 0;
 
 struct fs_superblock {
 	int magic;          // Magic bytes
@@ -49,6 +50,28 @@ void fs_debug()
 	printf("    %d blocks\n",block.super.nblocks);
 	printf("    %d inode blocks\n",block.super.ninodeblocks);
 	printf("    %d inodes\n",block.super.ninodes);
+
+
+	int inumber = 0;
+	for(int i = 1; i < block.super.ninodeblocks+1; i++) {
+		union fs_block newblock;
+		disk_read(i, newblock.data);
+
+		for(int j = 0; j < INODES_PER_BLOCK; j++ ){
+			if(newblock.inode[j].isvalid == 1) {
+				printf("inode %d\n", inumber);
+				printf("    size: %d bytes\n", newblock.inode[j].size);
+				printf("    direct blocks: ");
+				for(int k = 0; k < POINTERS_PER_INODE; k++) {
+					if (newblock.inode[j].direct[k] != 0) {
+						printf("%d ", newblock.inode[j].direct[k]);
+					}
+				}
+				printf("\n");
+			}
+			inumber += 1;
+		}
+	}
 }
 
 int fs_format()
@@ -108,6 +131,7 @@ int fs_mount()
 				}
 
 		}
+		mounted = 1;
 		return 1;
 	}
 
@@ -116,9 +140,12 @@ int fs_mount()
 
 int fs_unmount()
 {
+	if (!mounted) {
+		return 0;
+	}
 	free(bitmap);
+	mounted = 0;
 	return 1;
-	return 0;
 }
 
 int fs_create()
@@ -130,6 +157,10 @@ int fs_create()
 
 	int inumber = 0;
 
+	if(!mounted) {
+		return -1;
+	}
+
 	for(int i = 1; i < block.super.ninodeblocks+1; i++) {
 			union fs_block newblock;
 			disk_read(i, newblock.data);
@@ -140,6 +171,9 @@ int fs_create()
 					struct fs_inode inode;
 					inode.isvalid = 1;
 					inode.size = 0;
+					for(int k = 0; k < POINTERS_PER_INODE; k++ ) {
+						inode.direct[k] = 0;
+					}
 					newblock.inode[j] = inode;
 					disk_write(i, newblock.data);
 					return inumber;
