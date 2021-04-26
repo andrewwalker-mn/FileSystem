@@ -47,7 +47,13 @@ void fs_debug()
 	disk_read(0,block.data);
 
 	printf("superblock:\n");
-	printf("    %d blocks\n",block.super.nblocks);
+  if (block.super.magic == FS_MAGIC) {
+  	printf("    magic number is valid\n");
+  }
+  else {
+    printf("    magic number is NOT valid\n");
+  }
+	printf("    %d blocks on disk\n",block.super.nblocks);
 	printf("    %d inode blocks\n",block.super.ninodeblocks);
 	printf("    %d inodes\n",block.super.ninodes);
 
@@ -59,7 +65,7 @@ void fs_debug()
 
 		for(int j = 0; j < INODES_PER_BLOCK; j++ ){
 			if(newblock.inode[j].isvalid == 1) {
-				printf("inode %d\n", inumber);
+				printf("inode %d:\n", inumber);
 				printf("    size: %d bytes\n", newblock.inode[j].size);
 				printf("    direct blocks: ");
 				for(int k = 0; k < POINTERS_PER_INODE; k++) {
@@ -68,18 +74,46 @@ void fs_debug()
 					}
 				}
 				printf("\n");
+        if (newblock.inode[j].indirect) {
+          printf("    indirect block: %d\n", newblock.inode[j].indirect);
+          union fs_block indirectBlock;
+          disk_read(newblock.inode[j].indirect, indirectBlock.data);
+    
+          printf("    indirect data blocks: ");
+          for(int l = 0; l < POINTERS_PER_BLOCK; l++) {
+            if (indirectBlock.pointers[l] != 0) {
+              printf("%d ", indirectBlock.pointers[l]);
+            }
+          }
+          printf("\n");
+        }
 			}
 			inumber += 1;
 		}
+        
+    //TODO (future): This is also a great place to assert invariants in your 
+    // filesystem to make sure the disk matches with your expectation 
+    // and any in-memory structures you have (freemap). 
+    
+    //TODO (future): Filesystem commands should return failure if attempting to 
+    // perform operations that require the filesystem to be 
+    // mounted/unmounted (refer to solution exe). Check against solution exe
 	}
 }
 
 int fs_format()
 {
-	// put in magic number, choose ninodeblocks
-
-	int size = disk_size();
-
+  // create a new filesystem on the disk, destroying any data already present
+  int size = disk_size();
+  char zeroed_block[DISK_BLOCK_SIZE];
+  memset(zeroed_block, 0, sizeof(zeroed_block));
+  
+  for (int i=0; i<disk_size(); i++) {
+    disk_write(i, zeroed_block);
+  }
+    
+  // set aside 10% of the blocks for inodes, clear the inode table
+	// write the superblock
 	union fs_block block;
 	block.super.magic = FS_MAGIC;
 	block.super.nblocks = size;
@@ -95,7 +129,6 @@ int fs_format()
 
 int fs_mount()
 // build free block bitmap by scanning through all inodes and seeing which are in use
-
 {
 	union fs_block block;
 
@@ -108,7 +141,8 @@ int fs_mount()
 		for(int i = 1; i < block.super.ninodeblocks+1; i++) {
 				union fs_block newblock;
 				disk_read(i, newblock.data);
-
+        bitmap[i] = 1;
+        
 				// for each inode block iterate through its inodes (there should be 128)
 				for(int j = 0; j < INODES_PER_BLOCK; j++) {
 					if(newblock.inode[j].isvalid == 1) {
@@ -119,6 +153,7 @@ int fs_mount()
 							}
 						}
 						if (newblock.inode[j].indirect != 0) {
+              bitmap[newblock.inode[j].indirect] = 1;
 							union fs_block pointers;
 							disk_read(newblock.inode[j].indirect, pointers.data);
 							for(int k = 0; k < POINTERS_PER_BLOCK; k++) {
@@ -141,6 +176,7 @@ int fs_mount()
 int fs_unmount()
 {
 	if (!mounted) {
+    printf("Not currently mounted\n");
 		return 0;
 	}
 	free(bitmap);
@@ -158,6 +194,7 @@ int fs_create()
 	int inumber = 0;
 
 	if(!mounted) {
+    printf("Must be mounted to perform create\n");
 		return -1;
 	}
 
@@ -174,6 +211,7 @@ int fs_create()
 					for(int k = 0; k < POINTERS_PER_INODE; k++ ) {
 						inode.direct[k] = 0;
 					}
+          inode.indirect = 0;
 					newblock.inode[j] = inode;
 					disk_write(i, newblock.data);
 					return inumber;
