@@ -284,6 +284,16 @@ int fs_delete( int inumber )
 
 int fs_getsize( int inumber )
 {
+  if (!mounted) {
+    printf("Must be mounted to getsize");
+    return -1
+  }
+  union fs_block newblock;
+  disk_read(getBlockNumFromInodeNum(inumber), newblock.data);
+  if (newblock.inode[getOffsetFromInodeNum(inumber)].isvalid) {
+  return newblock.inode[getOffsetFromInodeNum(inumber)].size;
+  }
+  
 	return -1;
 }
 
