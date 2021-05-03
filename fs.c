@@ -130,6 +130,11 @@ int fs_format()
 int fs_mount()
 // build free block bitmap by scanning through all inodes and seeing which are in use
 {
+  if (mounted) {
+    printf("Unmount before remounting");
+		return 0;
+	}
+  
 	union fs_block block;
 
 	disk_read(0, block.data);
@@ -224,9 +229,57 @@ int fs_create()
 	return -1;
 }
 
+int getBlockNumFromInodeNum(int inumber) {
+  //Calculates the block that the inode is saved in
+  return inumber/INODES_PER_BLOCK + 1;
+}
+
+int getOffsetFromInodeNum(int inumber) {
+  //Calculates the offset into a block that the inode is saved in
+  return inumber % INODES_PER_BLOCK;
+}
+
 int fs_delete( int inumber )
 {
-	return 0;
+  // union fs_block block;
+  // disk_read(0, block.data);
+  
+  if (!mounted) {
+    printf("Must be mounted to perform delete\n");
+    return 0;
+  }
+  
+  union fs_block newblock;
+  disk_read(getBlockNumFromInodeNum(inumber), newblock.data);
+  int j = getOffsetFromInodeNum(inumber);
+  if (newblock.inode[j].isvalid != 1) {
+    return 0;
+  }
+  
+  //we dont have to write over with 0's, do we?
+  union fs_block pointers;
+  disk_read(newblock.inode[j].indirect, pointers.data);
+  
+  if (newblock.inode[j].indirect != 0) {
+    for(int k = 0; k < POINTERS_PER_BLOCK; k++) {
+      if (bitmap[pointers.pointers[k]] = 1) {
+        pointers.pointers[k] = 0;
+        bitmap[pointers.pointers[k]] = 0;
+      }
+    }
+    bitmap[newblock.inode[j].indirect] = 0;
+    newblock.inode[j].indirect = 0;
+  }
+  
+  for(int k = 0; k < POINTERS_PER_INODE; k++) {
+    if (bitmap[newblock.inode[j].direct[k]] = 1) {
+      newblock.inode[j].direct[k] = 0;
+      bitmap[newblock.inode[j].direct[k]] = 0;
+    }
+  }
+  newblock.inode[j].isvalid = 0;
+  disk_write(getBlockNumFromInodeNum(inumber), newblock.data);
+  return 1;
 }
 
 int fs_getsize( int inumber )
